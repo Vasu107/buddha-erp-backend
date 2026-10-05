@@ -1,0 +1,158 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  name      String
+  email     String    @unique
+  password  String
+  role      Role
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  student   Student?
+  faculty   Faculty?
+  hod       Hod?
+  director  Director?
+}
+
+model Student {
+  id              String           @id @default(uuid())
+  rollNumber      String           @unique
+  name            String
+  email           String           @unique
+  year            Int
+  department      String
+  userId          String?          @unique
+  user            User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  attendances     Attendance[]
+  studentSubjects StudentSubject[]
+  results         Result[]
+}
+
+model Faculty {
+  id          String   @id @default(uuid())
+  employeeId  String   @unique
+  name        String
+  email       String   @unique
+  department  String
+  userId      String?  @unique
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Hod {
+  id          String   @id @default(uuid())
+  employeeId  String   @unique
+  name        String
+  email       String   @unique
+  department  String
+  userId      String?  @unique
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Director {
+  id          String   @id @default(uuid())
+  employeeId  String   @unique
+  name        String
+  email       String   @unique
+  userId      String?  @unique
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Attendance {
+  id        String           @id @default(uuid())
+  studentId String
+  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  date      DateTime
+  status    AttendanceStatus
+  createdAt DateTime         @default(now())
+}
+
+model Subject {
+  id              String           @id @default(uuid())
+  code            String           @unique
+  name            String
+  department      String
+  credits         Int
+  year            Int
+  semester        Int
+  createdAt       DateTime         @default(now())
+
+  studentSubjects StudentSubject[]
+  assignments     Assignment[]
+  results         Result[]
+}
+
+model StudentSubject {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([studentId, subjectId])
+}
+
+model Assignment {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  subjectId   String
+  subject     Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  dueDate     DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Result {
+  id        String   @id @default(uuid())
+  studentId String
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  internal  Int
+  external  Int
+  total     Int
+  grade     String
+  points    Float
+  createdAt DateTime @default(now())
+}
+
+model Notice {
+  id        String   @id @default(uuid())
+  title     String
+  content   String
+  role      Role
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  STUDENT
+  FACULTY
+  HOD
+  DIRECTOR
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+}
