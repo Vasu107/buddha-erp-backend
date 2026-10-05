@@ -57,7 +57,7 @@ export const getSubjects = async (req: Request, res: Response): Promise<void> =>
 
 export const getSubjectById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) as string;
+    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
     const subject = await prisma.subject.findUnique({
       where: { id },
       include: {
@@ -78,7 +78,7 @@ export const getSubjectById = async (req: Request, res: Response): Promise<void>
 
 export const deleteSubject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) as string;
+    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
     const subject = await prisma.subject.findUnique({ where: { id } });
     if (!subject) {
       res.status(404).json({ success: false, message: "Subject not found" });

@@ -59,7 +59,7 @@ export const getNotices = async (req: Request, res: Response): Promise<void> => 
 
 export const deleteNotice = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) as string;
+    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
 
     const notice = await prisma.notice.findUnique({ where: { id } });
     if (!notice) {

@@ -6,11 +6,13 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+// Category & Role Based Route Imports
 import authRoutes from "./routes/auth.routes";
 import userRoutes from "./routes/user.routes";
-import studentRoutes from "./routes/student.routes";
-import facultyRoutes from "./routes/faculty.routes";
+import directorRoutes from "./routes/director.routes";
 import hodRoutes from "./routes/hod.routes";
+import facultyRoutes from "./routes/faculty.routes";
+import studentRoutes from "./routes/student.routes";
 import noticeRoutes from "./routes/notice.routes";
 import subjectRoutes from "./routes/subject.routes";
 import attendanceRoutes from "./routes/attendance.routes";
@@ -19,7 +21,7 @@ import resultRoutes from "./routes/result.routes";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security & Middleware
+// Security & Standard Middleware
 app.use(helmet());
 app.use(
   cors({
@@ -31,14 +33,25 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Health Check
+// Health Check Endpoint
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-// API Routes
+/* ==========================================================================
+   1. CATEGORY & ROLE-BASED MODULAR ROUTES (/api/roles/...)
+   ========================================================================== */
+app.use("/api/roles/director", directorRoutes);
+app.use("/api/roles/hod", hodRoutes);
+app.use("/api/roles/faculty", facultyRoutes);
+app.use("/api/roles/student", studentRoutes);
+
+/* ==========================================================================
+   2. DOMAIN & RESOURCE ROUTES (/api/...)
+   ========================================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/director", directorRoutes);
 app.use("/api/students", studentRoutes);
 app.use("/api/faculty", facultyRoutes);
 app.use("/api/hods", hodRoutes);
@@ -47,7 +60,7 @@ app.use("/api/subjects", subjectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/results", resultRoutes);
 
-// Global Error Handler
+// Global Error Handler Middleware
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("Unhandled error:", err);
   res.status(500).json({

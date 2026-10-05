@@ -7,12 +7,21 @@ import { Role } from "@prisma/client";
 const createUserSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().optional().default("123456"),
   role: z.enum(["DIRECTOR", "HOD", "FACULTY", "STUDENT"]),
   employeeId: z.string().optional(),
   department: z.string().optional(),
+  branch: z.string().optional(),
   rollNumber: z.string().optional(),
-  year: z.number().int().min(1).max(4).optional(),
+  rollNo: z.string().optional(),
+  year: z.number().int().min(1).max(6).optional(),
+  section: z.string().optional(),
+  session: z.string().optional(),
+  course: z.string().optional(),
+  designation: z.string().optional(),
+  status: z.string().optional(),
+  experience: z.number().optional(),
+  image: z.string().optional(),
 });
 
 export const createUser = async (req: Request, res: Response): Promise<void> => {
@@ -27,8 +36,29 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const { name, email, password, role, employeeId, department, rollNumber, year } = parseResult.data;
+    const {
+      name,
+      email,
+      password,
+      role,
+      employeeId,
+      department,
+      branch,
+      rollNumber,
+      rollNo,
+      year,
+      section,
+      session,
+      course,
+      designation,
+      status,
+      experience,
+      image,
+    } = parseResult.data;
+
     const creatorRole = req.user?.role;
+    const lowerEmail = email.toLowerCase().trim();
+    const dept = (department || branch || "CSE").trim();
 
     if (creatorRole === Role.STUDENT) {
       res.status(403).json({ success: false, message: "Students are not allowed to create users" });
@@ -46,7 +76,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
     }
 
     const existingUser = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: lowerEmail },
     });
 
     if (existingUser) {
@@ -62,10 +92,6 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         return;
       }
     } else if (role === Role.HOD) {
-      if (!department) {
-        res.status(400).json({ success: false, message: "Department is required for HOD" });
-        return;
-      }
       const empId = employeeId || `HOD-${Date.now().toString().slice(-4)}`;
       const existingHOD = await prisma.hod.findUnique({ where: { employeeId: empId } });
       if (existingHOD) {
@@ -73,10 +99,6 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         return;
       }
     } else if (role === Role.FACULTY) {
-      if (!department) {
-        res.status(400).json({ success: false, message: "Department is required for Faculty" });
-        return;
-      }
       const empId = employeeId || `FAC-${Date.now().toString().slice(-4)}`;
       const existingFaculty = await prisma.faculty.findUnique({ where: { employeeId: empId } });
       if (existingFaculty) {
@@ -84,11 +106,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         return;
       }
     } else if (role === Role.STUDENT) {
-      if (!department) {
-        res.status(400).json({ success: false, message: "Department is required for Student" });
-        return;
-      }
-      const rNum = rollNumber || `STU-${Date.now().toString().slice(-6)}`;
+      const rNum = (rollNumber || rollNo || `STU-${Date.now().toString().slice(-6)}`).trim();
       const existingStudent = await prisma.student.findUnique({ where: { rollNumber: rNum } });
       if (existingStudent) {
         res.status(400).json({ success: false, message: `Student with Roll Number ${rNum} already exists` });
@@ -96,15 +114,15 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
       }
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password || "123456", 10);
 
     const result = await prisma.$transaction(async (tx) => {
       const newUser = await tx.user.create({
         data: {
           name,
-          email: email.toLowerCase(),
+          email: lowerEmail,
           password: hashedPassword,
-          role,
+          role: role as Role,
         },
       });
 
@@ -115,7 +133,7 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         profileData = await tx.director.create({
           data: {
             name,
-            email: email.toLowerCase(),
+            email: lowerEmail,
             employeeId: empId,
             userId: newUser.id,
           },
@@ -125,9 +143,9 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         profileData = await tx.hod.create({
           data: {
             name,
-            email: email.toLowerCase(),
+            email: lowerEmail,
             employeeId: empId,
-            department: department!,
+            department: dept,
             userId: newUser.id,
           },
         });
@@ -136,21 +154,31 @@ export const createUser = async (req: Request, res: Response): Promise<void> => 
         profileData = await tx.faculty.create({
           data: {
             name,
-            email: email.toLowerCase(),
+            email: lowerEmail,
             employeeId: empId,
-            department: department!,
+            department: dept,
+            designation: designation || "Assistant Professor",
+            status: status || "Active",
+            experience: experience || 0,
+            image: image || null,
             userId: newUser.id,
           },
         });
       } else if (role === Role.STUDENT) {
-        const rNum = rollNumber || `STU-${Date.now().toString().slice(-6)}`;
+        const rNum = (rollNumber || rollNo || `STU-${Date.now().toString().slice(-6)}`).trim();
         profileData = await tx.student.create({
           data: {
             name,
-            email: email.toLowerCase(),
+            email: lowerEmail,
             rollNumber: rNum,
-            department: department!,
+            department: dept,
+            branch: branch || dept,
             year: year || 1,
+            section: section || null,
+            session: session || null,
+            course: course || dept,
+            status: status || "Active",
+            image: image || null,
             userId: newUser.id,
           },
         });
@@ -184,8 +212,8 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
 
     if (searchQuery) {
       whereClause.OR = [
-        { name: { contains: searchQuery } },
-        { email: { contains: searchQuery } },
+        { name: { contains: searchQuery, mode: "insensitive" } },
+        { email: { contains: searchQuery, mode: "insensitive" } },
       ];
     }
 
@@ -217,7 +245,7 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
 
 export const getUserById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) as string;
+    const targetId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
 
     const user = await prisma.user.findUnique({
       where: { id: targetId },
@@ -248,7 +276,7 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 
 export const deleteUser = async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) as string;
+    const targetId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
     const requesterRole = req.user?.role;
 
     const userToDelete = await prisma.user.findUnique({ where: { id: targetId } });

@@ -32,6 +32,14 @@ model Student {
   email           String           @unique
   year            Int
   department      String
+  branch          String?
+  section         String?
+  session         String?
+  course          String?
+  image           String?
+  cgpa            Float?           @default(0.0)
+  attendance      Float?           @default(0.0)
+  status          String?          @default("Active")
   userId          String?          @unique
   user            User?            @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt       DateTime         @default(now())
@@ -48,6 +56,10 @@ model Faculty {
   name        String
   email       String   @unique
   department  String
+  designation String?  @default("Assistant Professor")
+  status      String?  @default("Active")
+  experience  Int?     @default(0)
+  image       String?
   userId      String?  @unique
   user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt   DateTime @default(now())
