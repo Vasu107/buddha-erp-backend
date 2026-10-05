@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import prisma from "../config/prisma";
 import { Role } from "@prisma/client";
+import { getQueryString } from "../utils/param.utils";
 
 const createFacultySchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -61,46 +62,60 @@ export const createFaculty = async (req: Request, res: Response): Promise<void> 
     const hashedPassword = await bcrypt.hash(password || "faculty123", 10);
     const assignedRole = designation === "HOD" ? Role.HOD : Role.FACULTY;
 
-    const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({
-        data: {
-          name,
-          email: lowerEmail,
-          password: hashedPassword,
-          role: assignedRole,
-        },
-      });
+    let result;
+    try {
+      result = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.create({
+          data: {
+            name,
+            email: lowerEmail,
+            password: hashedPassword,
+            role: assignedRole,
+          },
+        });
 
-      let facultyProfile = null;
-      if (designation === "HOD") {
-        await tx.hod.create({
+        let facultyProfile = null;
+        if (designation === "HOD") {
+          await tx.hod.create({
+            data: {
+              name,
+              email: lowerEmail,
+              employeeId: empId,
+              department: dept,
+              userId: user.id,
+            },
+          });
+        }
+
+        facultyProfile = await tx.faculty.create({
           data: {
             name,
             email: lowerEmail,
             employeeId: empId,
             department: dept,
+            designation: designation || "Assistant Professor",
+            status: status || "Active",
+            experience: experience || 0,
+            image: image || null,
             userId: user.id,
           },
         });
-      }
 
-      facultyProfile = await tx.faculty.create({
-        data: {
-          name,
-          email: lowerEmail,
-          employeeId: empId,
-          department: dept,
-          designation: designation || "Assistant Professor",
-          status: status || "Active",
-          experience: experience || 0,
-          image: image || null,
-          userId: user.id,
-        },
+        const { password: _, ...userWithoutPassword } = user;
+        return { user: userWithoutPassword, faculty: facultyProfile };
       });
-
-      const { password: _, ...userWithoutPassword } = user;
-      return { user: userWithoutPassword, faculty: facultyProfile };
-    });
+    } catch (txError: any) {
+      // Prisma unique constraint violation (P2002) — surface a clean 400
+      if (txError?.code === "P2002") {
+        const field = txError.meta?.target?.join(", ") ?? "field";
+        res.status(400).json({
+          success: false,
+          message: `A record with this ${field} already exists. Please use a different email or employee ID.`,
+        });
+        return;
+      }
+      throw txError; // re-throw other DB errors to the outer catch
+    }
 
     res.status(201).json({
       success: true,
@@ -120,28 +135,34 @@ export const getFaculty = async (req: Request, res: Response): Promise<void> => 
     const statusQuery = typeof req.query.status === "string" ? req.query.status : undefined;
     const searchQuery = typeof req.query.search === "string" ? req.query.search : undefined;
 
-    const whereClause: any = {};
+    // Use an AND array so scalar filters and the search OR block don't
+    // collide on the same Prisma where object (causes 500 on Neon/PostgreSQL).
+    const andConditions: any[] = [];
 
     if (deptQuery && deptQuery !== "All Departments") {
-      whereClause.department = deptQuery;
+      andConditions.push({ department: deptQuery });
     }
 
     if (desigQuery && desigQuery !== "All Designations") {
-      whereClause.designation = desigQuery;
+      andConditions.push({ designation: desigQuery });
     }
 
     if (statusQuery && statusQuery !== "All Status") {
-      whereClause.status = statusQuery;
+      andConditions.push({ status: statusQuery });
     }
 
     if (searchQuery) {
-      whereClause.OR = [
-        { name: { contains: searchQuery, mode: "insensitive" } },
-        { email: { contains: searchQuery, mode: "insensitive" } },
-        { employeeId: { contains: searchQuery, mode: "insensitive" } },
-        { department: { contains: searchQuery, mode: "insensitive" } },
-      ];
+      andConditions.push({
+        OR: [
+          { name: { contains: searchQuery, mode: "insensitive" } },
+          { email: { contains: searchQuery, mode: "insensitive" } },
+          { employeeId: { contains: searchQuery, mode: "insensitive" } },
+          { department: { contains: searchQuery, mode: "insensitive" } },
+        ],
+      });
     }
+
+    const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const facultyList = await prisma.faculty.findMany({
       where: whereClause,
@@ -165,7 +186,11 @@ export const getFaculty = async (req: Request, res: Response): Promise<void> => 
 
 export const updateFaculty = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Faculty ID is required" });
+      return;
+    }
     const existingFaculty = await prisma.faculty.findUnique({ where: { id } });
     if (!existingFaculty) {
       res.status(404).json({ success: false, message: "Faculty not found" });
@@ -199,7 +224,11 @@ export const updateFaculty = async (req: Request, res: Response): Promise<void> 
 
 export const deleteFaculty = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Faculty ID is required" });
+      return;
+    }
     const faculty = await prisma.faculty.findUnique({ where: { id } });
 
     if (!faculty) {

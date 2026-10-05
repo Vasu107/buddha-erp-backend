@@ -51,19 +51,20 @@ model Student {
 }
 
 model Faculty {
-  id          String   @id @default(uuid())
-  employeeId  String   @unique
+  id          String       @id @default(uuid())
+  employeeId  String       @unique
   name        String
-  email       String   @unique
+  email       String       @unique
   department  String
-  designation String?  @default("Assistant Professor")
-  status      String?  @default("Active")
-  experience  Int?     @default(0)
+  designation String?      @default("Assistant Professor")
+  status      String?      @default("Active")
+  experience  Int?         @default(0)
   image       String?
-  userId      String?  @unique
-  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  userId      String?      @unique
+  user        User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  attendances Attendance[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }
 
 model Hod {
@@ -90,12 +91,28 @@ model Director {
 }
 
 model Attendance {
-  id        String           @id @default(uuid())
-  studentId String
-  student   Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  date      DateTime
-  status    AttendanceStatus
-  createdAt DateTime         @default(now())
+  id           String           @id @default(uuid())
+  studentId    String
+  student      Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId    String?
+  subject      Subject?         @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  facultyId    String?
+  faculty      Faculty?         @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+  date         DateTime
+  timeSlot     String?          // e.g. "09:00-10:00", "10:00-11:00"
+  branch       String?
+  department   String?
+  section      String?
+  status       AttendanceStatus
+  isSubmitted  Boolean          @default(false)
+  submittedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@index([date])
+  @@index([branch, department, date])
+  @@index([facultyId, date])
+  @@index([studentId, date])
 }
 
 model Subject {
@@ -103,6 +120,7 @@ model Subject {
   code            String           @unique
   name            String
   department      String
+  branch          String?
   credits         Int
   year            Int
   semester        Int
@@ -111,6 +129,7 @@ model Subject {
   studentSubjects StudentSubject[]
   assignments     Assignment[]
   results         Result[]
+  attendances     Attendance[]
 }
 
 model StudentSubject {

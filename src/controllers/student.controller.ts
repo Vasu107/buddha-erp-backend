@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import prisma from "../config/prisma";
 import { Role } from "@prisma/client";
+import { getQueryString } from "../utils/param.utils";
 
 const createStudentSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -117,28 +118,32 @@ export const getStudents = async (req: Request, res: Response): Promise<void> =>
     const sessionQuery = typeof req.query.session === "string" ? req.query.session : undefined;
     const searchQuery = typeof req.query.search === "string" ? req.query.search : undefined;
 
-    const whereClause: any = {};
+    // Collect all filter conditions into a top-level AND array so that
+    // multiple OR blocks (department filter + search filter) don't collide
+    // on the same Prisma where object — which causes a 500 on Neon/PostgreSQL.
+    const andConditions: any[] = [];
 
     const targetDept = branchQuery || deptQuery;
     if (targetDept && targetDept !== "All Courses" && targetDept !== "All Departments") {
-      whereClause.OR = [{ department: targetDept }, { branch: targetDept }, { course: targetDept }];
+      andConditions.push({
+        OR: [{ department: targetDept }, { branch: targetDept }, { course: targetDept }],
+      });
     }
 
     if (yearQuery && yearQuery !== "All Years") {
-      whereClause.year = parseInt(yearQuery, 10);
+      andConditions.push({ year: parseInt(yearQuery, 10) });
     }
 
     if (sectionQuery && sectionQuery !== "all") {
-      whereClause.section = sectionQuery;
+      andConditions.push({ section: sectionQuery });
     }
 
     if (sessionQuery) {
-      whereClause.session = sessionQuery;
+      andConditions.push({ session: sessionQuery });
     }
 
     if (searchQuery) {
-      whereClause.AND = whereClause.AND || [];
-      whereClause.AND.push({
+      andConditions.push({
         OR: [
           { name: { contains: searchQuery, mode: "insensitive" } },
           { email: { contains: searchQuery, mode: "insensitive" } },
@@ -146,6 +151,8 @@ export const getStudents = async (req: Request, res: Response): Promise<void> =>
         ],
       });
     }
+
+    const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
 
     const students = await prisma.student.findMany({
       where: whereClause,
@@ -169,7 +176,11 @@ export const getStudents = async (req: Request, res: Response): Promise<void> =>
 
 export const updateStudent = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Student ID is required" });
+      return;
+    }
     const existingStudent = await prisma.student.findUnique({ where: { id } });
     if (!existingStudent) {
       res.status(404).json({ success: false, message: "Student not found" });
@@ -206,7 +217,11 @@ export const updateStudent = async (req: Request, res: Response): Promise<void> 
 
 export const deleteStudent = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Student ID is required" });
+      return;
+    }
     const student = await prisma.student.findUnique({ where: { id } });
 
     if (!student) {

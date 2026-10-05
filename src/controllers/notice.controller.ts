@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { z } from "zod";
 import prisma from "../config/prisma";
 import { Role } from "@prisma/client";
+import { getQueryString } from "../utils/param.utils";
 
 const createNoticeSchema = z.object({
   title: z.string().min(3, "Title must be at least 3 characters"),
@@ -33,7 +34,7 @@ export const createNotice = async (req: Request, res: Response): Promise<void> =
 export const getNotices = async (req: Request, res: Response): Promise<void> => {
   try {
     const userRole = req.user?.role;
-    const roleQuery = typeof req.query.role === "string" ? req.query.role : undefined;
+    const roleQuery = getQueryString(req.query.role);
 
     const whereClause: any = {};
 
@@ -59,7 +60,11 @@ export const getNotices = async (req: Request, res: Response): Promise<void> => 
 
 export const deleteNotice = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Notice ID is required" });
+      return;
+    }
 
     const notice = await prisma.notice.findUnique({ where: { id } });
     if (!notice) {

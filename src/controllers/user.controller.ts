@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import prisma from "../config/prisma";
 import { Role } from "@prisma/client";
+import { getQueryString } from "../utils/param.utils";
 
 const createUserSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -245,7 +246,11 @@ export const getUsers = async (req: Request, res: Response): Promise<void> => {
 
 export const getUserById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const targetId = getQueryString(req.params.id);
+    if (!targetId) {
+      res.status(400).json({ success: false, message: "User ID is required" });
+      return;
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: targetId },
@@ -276,7 +281,11 @@ export const getUserById = async (req: Request, res: Response): Promise<void> =>
 
 export const deleteUser = async (req: Request, res: Response): Promise<void> => {
   try {
-    const targetId = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const targetId = getQueryString(req.params.id);
+    if (!targetId) {
+      res.status(400).json({ success: false, message: "User ID is required" });
+      return;
+    }
     const requesterRole = req.user?.role;
 
     const userToDelete = await prisma.user.findUnique({ where: { id: targetId } });

@@ -12,6 +12,7 @@ import userRoutes from "./routes/user.routes";
 import directorRoutes from "./routes/director.routes";
 import hodRoutes from "./routes/hod.routes";
 import facultyRoutes from "./routes/faculty.routes";
+import facultyRoleRoutes from "./routes/faculty.role.routes";
 import studentRoutes from "./routes/student.routes";
 import noticeRoutes from "./routes/notice.routes";
 import subjectRoutes from "./routes/subject.routes";
@@ -39,15 +40,15 @@ app.get("/health", (_req, res) => {
 });
 
 /* ==========================================================================
-   1. CATEGORY & ROLE-BASED MODULAR ROUTES (/api/roles/...)
+   ROLE-SPECIFIC ROUTES (/api/roles/...)
+   Note: directorRoutes and hodRoutes are NOT mounted here to avoid double-
+   registering the same Router instance (causes middleware to run twice → 500).
    ========================================================================== */
-app.use("/api/roles/director", directorRoutes);
-app.use("/api/roles/hod", hodRoutes);
-app.use("/api/roles/faculty", facultyRoutes);
-app.use("/api/roles/student", studentRoutes);
+app.use("/api/roles/faculty",  facultyRoleRoutes);  // faculty-specific: students + attendance lifecycle
+app.use("/api/roles/student",  studentRoutes);
 
 /* ==========================================================================
-   2. DOMAIN & RESOURCE ROUTES (/api/...)
+   DOMAIN & RESOURCE ROUTES (/api/...)
    ========================================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);

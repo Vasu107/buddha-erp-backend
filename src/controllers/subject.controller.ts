@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { z } from "zod";
 import prisma from "../config/prisma";
+import { getQueryString } from "../utils/param.utils";
 
 const createSubjectSchema = z.object({
   code: z.string().min(2, "Subject code required"),
@@ -35,14 +36,16 @@ export const createSubject = async (req: Request, res: Response): Promise<void> 
 
 export const getSubjects = async (req: Request, res: Response): Promise<void> => {
   try {
-    const deptQuery = typeof req.query.department === "string" ? req.query.department : undefined;
-    const yearQuery = req.query.year ? parseInt(req.query.year as string) : undefined;
-    const semQuery = req.query.semester ? parseInt(req.query.semester as string) : undefined;
+    const deptQuery = getQueryString(req.query.department);
+    const rawYear = getQueryString(req.query.year);
+    const yearQuery = rawYear ? parseInt(rawYear, 10) : undefined;
+    const rawSem = getQueryString(req.query.semester);
+    const semQuery = rawSem ? parseInt(rawSem, 10) : undefined;
 
     const whereClause: any = {};
     if (deptQuery) whereClause.department = deptQuery;
-    if (yearQuery) whereClause.year = yearQuery;
-    if (semQuery) whereClause.semester = semQuery;
+    if (yearQuery && !isNaN(yearQuery)) whereClause.year = yearQuery;
+    if (semQuery && !isNaN(semQuery)) whereClause.semester = semQuery;
 
     const subjects = await prisma.subject.findMany({
       where: whereClause,
@@ -57,7 +60,12 @@ export const getSubjects = async (req: Request, res: Response): Promise<void> =>
 
 export const getSubjectById = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Subject ID is required" });
+      return;
+    }
+
     const subject = await prisma.subject.findUnique({
       where: { id },
       include: {
@@ -78,7 +86,12 @@ export const getSubjectById = async (req: Request, res: Response): Promise<void>
 
 export const deleteSubject = async (req: Request, res: Response): Promise<void> => {
   try {
-    const id = String(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
+    const id = getQueryString(req.params.id);
+    if (!id) {
+      res.status(400).json({ success: false, message: "Subject ID is required" });
+      return;
+    }
+
     const subject = await prisma.subject.findUnique({ where: { id } });
     if (!subject) {
       res.status(404).json({ success: false, message: "Subject not found" });
