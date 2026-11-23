@@ -4,8 +4,8 @@ import {
   getDirectorProfile,
   updateDirectorProfile,
 } from "../controllers/director.controller";
-import { createFaculty, getFaculty, updateFaculty, deleteFaculty } from "../controllers/faculty.controller";
-import { createStudent, getStudents, updateStudent, deleteStudent } from "../controllers/student.controller";
+import { createFaculty, getFaculty, updateFaculty, deleteFaculty, bulkCreateFaculty } from "../controllers/faculty.controller";
+import { createStudent, getStudents, updateStudent, deleteStudent, bulkCreateStudents } from "../controllers/student.controller";
 import { createHOD, getHODs } from "../controllers/hod.controller";
 import {
   getDirectorAttendance,
@@ -27,12 +27,14 @@ router.get("/profile", getDirectorProfile);
 router.put("/profile", updateDirectorProfile);
 
 // Director Faculty Management
+router.post("/faculty/bulk", bulkCreateFaculty); // must be before /:id routes
 router.post("/faculty",      createFaculty);
 router.get("/faculty",       getFaculty);
 router.put("/faculty/:id",   updateFaculty);
 router.delete("/faculty/:id",deleteFaculty);
 
 // Director Student Management
+router.post("/students/bulk", bulkCreateStudents); // must be before /:id routes
 router.post("/students",      createStudent);
 router.get("/students",       getStudents);
 router.put("/students/:id",   updateStudent);

@@ -34,8 +34,9 @@ model Student {
   department      String
   branch          String?
   section         String?
-  session         String?
-  course          String?
+  session         String?          // e.g. "2023-2027", "2022-2026"
+  course          String?          // e.g. "B.Tech", "B.Sc"
+  semester        Int?             @default(1) // Current active semester (1-8 for B.Tech, 1-6 for B.Sc)
   image           String?
   cgpa            Float?           @default(0.0)
   attendance      Float?           @default(0.0)
@@ -48,6 +49,9 @@ model Student {
   attendances     Attendance[]
   studentSubjects StudentSubject[]
   results         Result[]
+
+  @@index([department, session])
+  @@index([course, session, year])
 }
 
 model Faculty {
@@ -115,32 +119,93 @@ model Attendance {
   @@index([studentId, date])
 }
 
-model Subject {
+model Course {
+  id             String            @id @default(uuid())
+  code           String            @unique // e.g., "BTECH", "BSC", "BCA", "MCA"
+  name           String            // e.g., "Bachelor of Technology", "Bachelor of Science"
+  durationYears  Int               @default(4) // e.g. 4 for B.Tech, 3 for B.Sc
+  totalSemesters Int               @default(8) // e.g. 8 for B.Tech, 6 for B.Sc
+  department     String?           // Default department or null for multi-dept
+  description    String?
+  status         String?           @default("Active")
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  sessions       AcademicSession[]
+  subjects       Subject[]
+}
+
+model AcademicSession {
   id              String           @id @default(uuid())
-  code            String           @unique
-  name            String
-  department      String
-  branch          String?
-  credits         Int
-  year            Int
-  semester        Int
+  sessionName     String           // e.g. "2023-2027", "2022-2026", "2024-2028"
+  startYear       Int              // e.g. 2023
+  endYear         Int              // e.g. 2027
+  courseId        String?
+  course          Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseCode      String?          // e.g. "B.Tech", "B.Sc"
+  totalSemesters  Int              @default(8) // derived from degree (e.g. 8 for B.Tech, 6 for B.Sc)
+  currentSemester Int?             @default(1)
+  status          String?          @default("Active") // "Active", "Completed", "Upcoming"
   createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  studentSubjects StudentSubject[]
+
+  @@unique([sessionName, courseCode])
+  @@index([sessionName])
+}
+
+model Subject {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  department  String
+  branch      String?
+  credits     Int              // Academic Credits (starts at 0)
+  year        Int
+  semester    Int
+  type        String?          @default("Core") // "Core", "Elective", "Lab", "Project"
+  status      String?          @default("Active") // "Active", "Inactive"
+  courseId    String?
+  course      Course?          @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseName  String?          @default("B.Tech") // e.g. "B.Tech", "B.Sc"
+  createdAt   DateTime         @default(now())
 
   studentSubjects StudentSubject[]
   assignments     Assignment[]
   results         Result[]
   attendances     Attendance[]
+
+  @@index([department, semester])
+  @@index([branch, semester])
+  @@index([courseName, semester])
 }
 
 model StudentSubject {
-  id        String   @id @default(uuid())
-  studentId String
-  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subjectId String
-  subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  id              String           @id @default(uuid())
+  studentId       String
+  student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subjectId       String
+  subject         Subject          @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  semester        Int              @default(1) // Semester for which subject is opted (1 to 8)
+  session         String           @default("2023-2027") // Academic session e.g. "2023-2027", "2022-2026"
+  department      String?          // e.g. "Computer Science & Engineering (CSE)"
+  course          String?          @default("B.Tech") // e.g. "B.Tech", "B.Sc"
+  academicYear    String?          // e.g. "2023-2024"
+  isOpted         Boolean          @default(true)
+  status          String?          @default("Enrolled") // "Enrolled", "Completed", "Dropped"
+  optedAt         DateTime         @default(now())
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt @default(now())
 
-  @@unique([studentId, subjectId])
+  sessionId       String?
+  academicSession AcademicSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, subjectId, semester, session])
+  @@index([studentId, semester])
+  @@index([department, semester, session])
+  @@index([session, semester])
+  @@index([subjectId])
 }
 
 model Assignment {
@@ -186,4 +251,39 @@ enum Role {
 enum AttendanceStatus {
   PRESENT
   ABSENT
+  LATE
+}
+
+model CurriculumPlan {
+  id             String   @id @default(uuid())
+  schemeName     String
+  department     String
+  academicYear   String
+  totalCredits   Int      @default(160)
+  semestersCount Int      @default(8)
+  regulations    String
+  status         String   @default("Active") // "Active" | "Draft" | "Archived"
+  pdfUrl         String?  // optional PDF attachment
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt @default(now())
+
+  @@index([department, status])
+  @@index([academicYear])
+}
+
+model Syllabus {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  subject     String
+  department  String
+  semester    Int
+  units       Int      @default(5)
+  totalHours  Int      @default(45)
+  docUrl      String?
+  status      String   @default("Active") // "Active" | "Under Review"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt @default(now())
+
+  @@index([department, semester])
+  @@index([status])
 }

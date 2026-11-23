@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createSubject, getSubjects, getSubjectById, deleteSubject } from "../controllers/subject.controller";
+import { createSubject, updateSubject, getSubjects, getSubjectById, deleteSubject } from "../controllers/subject.controller";
 import { authenticateToken, requireRole } from "../middleware/auth";
 import { Role } from "@prisma/client";
 
@@ -13,6 +13,9 @@ router.get("/:id", getSubjectById);
 
 // POST — Director and HOD only can create subjects
 router.post("/", requireRole([Role.DIRECTOR, Role.HOD]), createSubject);
+
+// PUT — Director and HOD can update subjects
+router.put("/:id", requireRole([Role.DIRECTOR, Role.HOD]), updateSubject);
 
 // DELETE — Director only
 router.delete("/:id", requireRole([Role.DIRECTOR]), deleteSubject);

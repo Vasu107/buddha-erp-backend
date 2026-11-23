@@ -5,6 +5,52 @@ import prisma from "../config/prisma";
 import { Role } from "@prisma/client";
 import { getQueryString } from "../utils/param.utils";
 
+/**
+ * Resolves the department that should be used to scope faculty queries.
+ *
+ * Rules:
+ *  1. Role === HOD  → look up hod table by userId (standard HOD login).
+ *  2. Role === FACULTY and faculty.designation === "HOD"
+ *     → treat them as an HOD: find their HOD record (by userId or email)
+ *       and return that department; falls back to faculty.department if no
+ *       HOD row exists yet.
+ *  3. Any other role (DIRECTOR, STUDENT) → return null (unrestricted).
+ */
+async function getHodDepartment(req: Request): Promise<string | null> {
+  const userId = req.user?.userId;
+  const role   = req.user?.role;
+
+  // ── Standard HOD role ──────────────────────────────────────────────────
+  if (role === Role.HOD) {
+    const hod = (await prisma.hod.findFirst({ where: { userId } })) ??
+      (await prisma.hod.findUnique({ where: { userId } as any }));
+    if (!hod) throw new Error("HOD profile not found for this account");
+    return hod.department;
+  }
+
+  // ── Faculty with designation "HOD" ─────────────────────────────────────
+  if (role === Role.FACULTY) {
+    const facultyRecord = await prisma.faculty.findFirst({
+      where: { userId, designation: "HOD" },
+    });
+
+    if (facultyRecord) {
+      // Prefer HOD table (by userId, then by email) so the exact department
+      // configured by the director is used.
+      const hod =
+        await prisma.hod.findFirst({ where: { userId } }) ??
+        await prisma.hod.findFirst({ where: { email: facultyRecord.email } });
+
+      // Return HOD table department if found; otherwise fall back to the
+      // faculty record's own department field.
+      return hod ? hod.department : facultyRecord.department;
+    }
+  }
+
+  // Director / Student — unrestricted
+  return null;
+}
+
 const createFacultySchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
   email: z.string().email("Invalid email address"),
@@ -44,8 +90,11 @@ export const createFaculty = async (req: Request, res: Response): Promise<void> 
     } = parseResult.data;
 
     const empId = (employeeId || `EMP${Date.now().toString().slice(-6)}`).trim();
-    const dept = (department || branch || "Computer Science & Engineering (CSE)").trim();
     const lowerEmail = email.toLowerCase().trim();
+
+    // If caller is HOD, always force department to their own department
+    const hodDept = await getHodDepartment(req);
+    const dept = hodDept ?? (department || branch || "Computer Science & Engineering (CSE)").trim();
 
     const existingUser = await prisma.user.findUnique({ where: { email: lowerEmail } });
     if (existingUser) {
@@ -128,6 +177,158 @@ export const createFaculty = async (req: Request, res: Response): Promise<void> 
   }
 };
 
+const bulkFacultyItemSchema = z.object({
+  name: z.string().min(2, "Name must be at least 2 characters"),
+  // Email is validated loosely here — the frontend already normalises/auto-generates it
+  email: z.string().min(3, "Email is required"),
+  employeeId: z.string().optional(),
+  department: z.string().optional(),
+  branch: z.string().optional(),
+  designation: z.string().optional().default("Assistant Professor"),
+  status: z.string().optional().default("Active"),
+  experience: z.union([z.string(), z.number()]).transform((v) => Number(v) || 0).optional(),
+  image: z.string().optional(),
+});
+
+export const bulkCreateFaculty = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { faculty: rawFaculty, password } = req.body as {
+      faculty: any[];
+      password?: string;
+    };
+
+    if (!Array.isArray(rawFaculty) || rawFaculty.length === 0) {
+      res.status(400).json({ success: false, message: "No faculty data provided" });
+      return;
+    }
+
+    const sharedPassword = (password || "faculty123").trim();
+    const hashedPassword = await bcrypt.hash(sharedPassword, 10);
+
+    // If caller is HOD, lock all imports to their own department
+    const hodDept = await getHodDepartment(req);
+
+    const created: any[] = [];
+    const skipped: { row: number; reason: string; name: string }[] = [];
+
+    const seenEmails = new Set<string>();
+    const seenEmpIds = new Set<string>();
+
+    for (let i = 0; i < rawFaculty.length; i++) {
+      const raw = rawFaculty[i];
+
+      // ── Per-row validation (skip bad rows, don't abort entire batch) ──
+      const parseResult = bulkFacultyItemSchema.safeParse(raw);
+      if (!parseResult.success) {
+        const reason = parseResult.error.errors.map((e) => e.message).join("; ");
+        skipped.push({ row: i + 1, name: raw?.name ?? `Row ${i + 1}`, reason });
+        continue;
+      }
+
+      const row = parseResult.data;
+
+      const lowerEmail = row.email.toLowerCase().trim();
+
+      // Generate a truly unique employee ID when not provided
+      const empId = (row.employeeId && row.employeeId.trim())
+        ? row.employeeId.trim()
+        : `EMP${Date.now().toString().slice(-6)}${String(i + 1).padStart(3, "0")}`;
+
+      // HOD: override every row's department to their own; Director: use spreadsheet value
+      const dept = hodDept ?? (row.department || row.branch || "Computer Science & Engineering (CSE)").trim();
+      const designation = (row.designation || "Assistant Professor").trim();
+      const status = (row.status || "Active").trim();
+      const experience = Number(row.experience) || 0;
+
+      // ── In-batch duplicate guards ──
+      if (seenEmails.has(lowerEmail)) {
+        skipped.push({ row: i + 1, name: row.name, reason: `Duplicate email "${lowerEmail}" in spreadsheet` });
+        continue;
+      }
+      if (seenEmpIds.has(empId)) {
+        skipped.push({ row: i + 1, name: row.name, reason: `Duplicate Employee ID "${empId}" in spreadsheet` });
+        continue;
+      }
+
+      // ── Database duplicate guards ──
+      const [existingUser, existingFaculty, existingHod] = await Promise.all([
+        prisma.user.findUnique({ where: { email: lowerEmail } }),
+        prisma.faculty.findUnique({ where: { employeeId: empId } }),
+        prisma.hod.findUnique({ where: { employeeId: empId } }),
+      ]);
+
+      if (existingUser) {
+        skipped.push({ row: i + 1, name: row.name, reason: `Email "${lowerEmail}" already in use` });
+        continue;
+      }
+      if (existingFaculty || existingHod) {
+        skipped.push({ row: i + 1, name: row.name, reason: `Employee ID "${empId}" already exists` });
+        continue;
+      }
+
+      seenEmails.add(lowerEmail);
+      seenEmpIds.add(empId);
+
+      const assignedRole = designation === "HOD" ? Role.HOD : Role.FACULTY;
+
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              name: row.name,
+              email: lowerEmail,
+              password: hashedPassword,
+              role: assignedRole,
+            },
+          });
+
+          if (designation === "HOD") {
+            await tx.hod.create({
+              data: {
+                name: row.name,
+                email: lowerEmail,
+                employeeId: empId,
+                department: dept,
+                userId: user.id,
+              },
+            });
+          }
+
+          const facultyProfile = await tx.faculty.create({
+            data: {
+              name: row.name,
+              email: lowerEmail,
+              employeeId: empId,
+              department: dept,
+              designation,
+              status,
+              experience,
+              image: row.image || null,
+              userId: user.id,
+            },
+          });
+
+          return facultyProfile;
+        });
+
+        created.push(result);
+      } catch (err: any) {
+        skipped.push({ row: i + 1, name: row.name, reason: err.message || "Failed to create faculty record" });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Imported ${created.length} faculty members. ${skipped.length} skipped.`,
+      created: created.length,
+      skipped,
+    });
+  } catch (error: any) {
+    console.error("Bulk create faculty error:", error);
+    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
 export const getFaculty = async (req: Request, res: Response): Promise<void> => {
   try {
     const deptQuery = typeof req.query.department === "string" ? req.query.department : undefined;
@@ -139,7 +340,11 @@ export const getFaculty = async (req: Request, res: Response): Promise<void> => 
     // collide on the same Prisma where object (causes 500 on Neon/PostgreSQL).
     const andConditions: any[] = [];
 
-    if (deptQuery && deptQuery !== "All Departments") {
+    // HOD can only see faculty in their own department — ignore the query param
+    const hodDept = await getHodDepartment(req);
+    if (hodDept) {
+      andConditions.push({ department: hodDept });
+    } else if (deptQuery && deptQuery !== "All Departments") {
       andConditions.push({ department: deptQuery });
     }
 
@@ -197,6 +402,16 @@ export const updateFaculty = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
+    // HOD can only update faculty within their own department
+    const hodDept = await getHodDepartment(req);
+    if (hodDept && existingFaculty.department !== hodDept) {
+      res.status(403).json({
+        success: false,
+        message: `Access denied: You can only manage faculty in your department (${hodDept}).`,
+      });
+      return;
+    }
+
     const { name, email, department, designation, status, experience, image } = req.body;
 
     const updatedFaculty = await prisma.faculty.update({
@@ -233,6 +448,16 @@ export const deleteFaculty = async (req: Request, res: Response): Promise<void> 
 
     if (!faculty) {
       res.status(404).json({ success: false, message: "Faculty member not found" });
+      return;
+    }
+
+    // HOD can only delete faculty within their own department
+    const hodDept = await getHodDepartment(req);
+    if (hodDept && faculty.department !== hodDept) {
+      res.status(403).json({
+        success: false,
+        message: `Access denied: You can only manage faculty in your department (${hodDept}).`,
+      });
       return;
     }
 

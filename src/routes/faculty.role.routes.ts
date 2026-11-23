@@ -1,4 +1,4 @@
-import { Router } from "express";
+ï»¿import { Router } from "express";
 import { Role } from "@prisma/client";
 import { authenticateToken, requireRole } from "../middleware/auth";
 
@@ -19,17 +19,17 @@ const router = Router();
 
 // All routes require authentication + FACULTY (or HOD) role
 router.use(authenticateToken);
-router.use(requireRole([Role.FACULTY, Role.HOD]));
+router.use(requireRole([Role.FACULTY, Role.HOD, Role.DIRECTOR]));
 
 /* ----------------------------------------------------------
    Students accessible to this faculty member
-   GET  /api/roles/faculty/students          — students in faculty dept (filterable)
+   GET  /api/roles/faculty/students          â€” students in faculty dept (filterable)
    ---------------------------------------------------------- */
 router.get("/students",          getMyStudents);
 router.get("/students/all",      getStudents);   // unscoped list (same as /api/students)
 
 /* ----------------------------------------------------------
-   Attendance — mark, bulk-mark, submit, view, summary
+   Attendance â€” mark, bulk-mark, submit, view, summary
    ---------------------------------------------------------- */
 router.get("/attendance",          getFacultyAttendance);    // GET  /api/roles/faculty/attendance
 router.get("/attendance/summary",  getAttendanceSummary);    // GET  /api/roles/faculty/attendance/summary
@@ -38,3 +38,5 @@ router.post("/attendance/bulk",    bulkMarkAttendance);      // POST /api/roles/
 router.post("/attendance/submit",  submitAttendance);        // POST /api/roles/faculty/attendance/submit
 
 export default router;
+
+1

@@ -131,7 +131,10 @@ export const getStudents = async (req: Request, res: Response): Promise<void> =>
     }
 
     if (yearQuery && yearQuery !== "All Years") {
-      andConditions.push({ year: parseInt(yearQuery, 10) });
+      const parsedYear = parseInt(yearQuery, 10);
+      if (!isNaN(parsedYear)) {
+        andConditions.push({ year: parsedYear });
+      }
     }
 
     if (sectionQuery && sectionQuery !== "all") {
@@ -170,6 +173,7 @@ export const getStudents = async (req: Request, res: Response): Promise<void> =>
       students,
     });
   } catch (error: any) {
+    console.error("Get students error:", error);
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
 };
@@ -237,6 +241,120 @@ export const deleteStudent = async (req: Request, res: Response): Promise<void> 
 
     res.status(200).json({ success: true, message: "Student deleted successfully" });
   } catch (error: any) {
+    res.status(500).json({ success: false, message: "Internal server error", error: error.message });
+  }
+};
+
+// ── Bulk import students from Excel / CSV ───────────────────────────────────
+// 9 columns are expected: Roll No, Name, Email, Course, Year, Branch, Attendance, CGPA, Status
+// Password is shared across all imported students.
+const bulkStudentSchema = z.array(
+  z.object({
+    rollNumber: z.string().min(1, "Roll Number is required"),
+    name: z.string().min(2, "Name must be at least 2 characters"),
+    email: z.string().optional(), // fetched from Excel or auto-generated fallback
+    course: z.string().optional(),
+    branch: z.string().optional(),
+    year: z.union([z.string(), z.number()]).transform((v) => Number(v) || 1),
+    attendance: z.union([z.string(), z.number()]).transform((v) => Number(v) || 0).optional(),
+    cgpa: z.union([z.string(), z.number()]).transform((v) => Number(v) || 0).optional(),
+    status: z.string().optional(),
+  })
+);
+
+export const bulkCreateStudents = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { students: rawStudents, password } = req.body as {
+      students: any[];
+      password?: string;
+    };
+
+    if (!Array.isArray(rawStudents) || rawStudents.length === 0) {
+      res.status(400).json({ success: false, message: "No student data provided" });
+      return;
+    }
+
+    const parseResult = bulkStudentSchema.safeParse(rawStudents);
+    if (!parseResult.success) {
+      res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: parseResult.error.errors,
+      });
+      return;
+    }
+
+    const sharedPassword = (password || "student123").trim();
+    const hashedPassword = await bcrypt.hash(sharedPassword, 10);
+
+    const created: any[] = [];
+    const skipped: { row: number; reason: string; name: string }[] = [];
+
+    for (let i = 0; i < parseResult.data.length; i++) {
+      const row = parseResult.data[i];
+      const rNo = row.rollNumber.trim();
+      const dept = (row.branch || row.course || "CSE").trim();
+      // Use provided email or auto-generate from roll number
+      const lowerEmail = row.email
+        ? row.email.toLowerCase().trim()
+        : `${rNo.toLowerCase().replace(/[^a-z0-9]/g, "")}@bit.ac.in`;
+
+      // Check duplicates
+      const [existingUser, existingStudent] = await Promise.all([
+        prisma.user.findUnique({ where: { email: lowerEmail } }),
+        prisma.student.findUnique({ where: { rollNumber: rNo } }),
+      ]);
+
+      if (existingUser) {
+        skipped.push({ row: i + 1, name: row.name, reason: `Email "${lowerEmail}" already in use` });
+        continue;
+      }
+      if (existingStudent) {
+        skipped.push({ row: i + 1, name: row.name, reason: `Roll Number "${rNo}" already exists` });
+        continue;
+      }
+
+      try {
+        const result = await prisma.$transaction(async (tx) => {
+          const user = await tx.user.create({
+            data: {
+              name: row.name,
+              email: lowerEmail,
+              password: hashedPassword,
+              role: Role.STUDENT,
+            },
+          });
+          const student = await tx.student.create({
+            data: {
+              name: row.name,
+              email: lowerEmail,
+              rollNumber: rNo,
+              department: dept,
+              branch: dept,
+              year: Number(row.year) || 1,
+              course: row.course || dept,
+              attendance: Number(row.attendance) || 0,
+              cgpa: Number(row.cgpa) || 0,
+              status: row.status || "Active",
+              userId: user.id,
+            },
+          });
+          return student;
+        });
+        created.push(result);
+      } catch (err: any) {
+        skipped.push({ row: i + 1, name: row.name, reason: err.message });
+      }
+    }
+
+    res.status(201).json({
+      success: true,
+      message: `Imported ${created.length} students. ${skipped.length} skipped.`,
+      created: created.length,
+      skipped,
+    });
+  } catch (error: any) {
+    console.error("Bulk create students error:", error);
     res.status(500).json({ success: false, message: "Internal server error", error: error.message });
   }
 };

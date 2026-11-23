@@ -3,8 +3,13 @@ import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
+import path from "path";
+import { fileURLToPath } from "url";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Category & Role Based Route Imports
 import authRoutes from "./routes/auth.routes";
@@ -18,6 +23,8 @@ import noticeRoutes from "./routes/notice.routes";
 import subjectRoutes from "./routes/subject.routes";
 import attendanceRoutes from "./routes/attendance.routes";
 import resultRoutes from "./routes/result.routes";
+import curriculumRoutes from "./routes/curriculum.routes";
+import syllabusRoutes from "./routes/syllabus.routes";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,6 +40,9 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Serve uploaded files (PDFs, etc.)
+app.use("/uploads", express.static(path.resolve(__dirname, "../../../uploads")));
 
 // Health Check Endpoint
 app.get("/health", (_req, res) => {
@@ -60,6 +70,8 @@ app.use("/api/notices", noticeRoutes);
 app.use("/api/subjects", subjectRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/results", resultRoutes);
+app.use("/api/curriculum", curriculumRoutes);
+app.use("/api/syllabus", syllabusRoutes);
 
 // Global Error Handler Middleware
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
